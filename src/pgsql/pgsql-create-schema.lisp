@@ -391,43 +391,48 @@
           (pomo:execute "set client_min_messages to warning;")
           (pomo:execute "listen seqs")
 
-          (when tables
-            (pomo:execute
-             (format nil "create temp table reloids(oid) as values ~{('~a'::regclass)~^,~}"
-                     (mapcar #'format-table-name tables))))
-
           (handler-case
               (let ((sql (format nil "
 DO $$
 DECLARE
-  n integer := 0;
-  r record;
+    seq_record RECORD;
+    table_name TEXT;
+    column_name TEXT;
+    max_value BIGINT;
+    sequences_altered INTEGER := 0;
 BEGIN
-  FOR r in
-       SELECT 'select '
-               || trim(trailing ')'
-                  from replace(pg_get_expr(d.adbin, d.adrelid),
-                               'nextval', 'setval'))
-               || ', (select greatest(max(' || quote_ident(a.attname) || '), (select seqmin from pg_sequence where seqrelid = ('''
-               || pg_get_serial_sequence(quote_ident(nspname) || '.' || quote_ident(relname), quote_ident(a.attname)) || ''')::regclass limit 1), 1) from only '
-               || quote_ident(nspname) || '.' || quote_ident(relname) || '));' as sql
-         FROM pg_class c
-              JOIN pg_namespace n on n.oid = c.relnamespace
-              JOIN pg_attribute a on a.attrelid = c.oid
-              JOIN pg_attrdef d on d.adrelid = a.attrelid
-                                 and d.adnum = a.attnum
-                                 and a.atthasdef
-        WHERE relkind = 'r' and a.attnum > 0
-              and pg_get_expr(d.adbin, d.adrelid) ~~ '^nextval'
-              ~@[and c.oid in (select oid from reloids)~]
-  LOOP
-    n := n + 1;
-    EXECUTE r.sql;
-  END LOOP;
-
-  PERFORM pg_notify('seqs', n::text);
-END;
-$$; " tables)))
+    -- Loop through all sequences in the public schema with the pattern TABLE_FIELD_seq
+    FOR seq_record IN 
+        SELECT schemaname, sequencename 
+        FROM pg_sequences 
+        WHERE schemaname = 'public' 
+        AND sequencename LIKE '%_%_seq'
+    LOOP
+        -- Extract table name and column name from sequence name
+        -- Remove '_seq' suffix and split by the last underscore
+        table_name := regexp_replace(seq_record.sequencename, '_[^_]+_seq$', '');
+        column_name := regexp_replace(seq_record.sequencename, '^.*_([^_]+)_seq$', '\1');
+        
+        -- Get the maximum value from the table column
+        EXECUTE format('SELECT COALESCE(MAX(%I), 0) FROM %I.%I', 
+                      column_name, seq_record.schemaname, table_name) 
+        INTO max_value;
+        
+        -- Set the sequence to max_value + 1
+        EXECUTE format('ALTER SEQUENCE %I.%I RESTART WITH %s', 
+                      seq_record.schemaname, seq_record.sequencename, max_value + 1);
+        
+        sequences_altered := sequences_altered + 1;
+        
+        RAISE NOTICE 'Reset sequence % to % (table: %, column: %)', 
+                     seq_record.sequencename, max_value + 1, table_name, column_name;
+    END LOOP;
+    
+    -- Notify with the number of sequences altered
+    PERFORM pg_notify('seqs', sequences_altered::text);
+    
+    RAISE NOTICE 'Total sequences reset: %', sequences_altered;
+END $$;" tables)))
                 (pomo:execute sql))
             ;; now get the notification signal
             (cl-postgres:postgresql-notification (c)

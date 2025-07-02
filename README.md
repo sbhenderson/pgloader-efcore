@@ -19,3 +19,5 @@ load database
 ## Theory
 
 With the normal pgloader, reset sequences will not work since it did not create schema. Actually, to be honest, I don't know if that's the absolutely true reason, but when looking at `reset-sequences` and looking at the exact queries used, it is simply not compatible with the structure of the main SQL query because, when transferring without creating schema, the only thing in the `temp table reloids(oid)` are the table names which is not at all correct for `c.oid in (select oid from reloids)`.
+
+The only change is in `pgsql-create-schema` to take advantage of the EF Core's PostgreSQL sequence naming in that it is always `TABLE_FIELD_seq`. As a result, we do not need to go on an adventure to find out which tables and which fields sequences belong to as, indeed, it's specified in the name itself. This is a brittle assumption as there are no guarantees about naming, but we can address it if this comes up. This is known to work with EF Core 8 and 9.
