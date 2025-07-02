@@ -410,11 +410,11 @@ BEGIN
     LOOP
         -- Extract table name and column name from sequence name
         -- Remove '_seq' suffix and split by the last underscore
-        -- table_name := regexp_replace(seq_record.sequencename, '_[^_]+_seq$', '');
-        -- is it a \1 or a \\1?
-        -- column_name := regexp_replace(seq_record.sequencename, '^.*_([^_]+)_seq$', '\\1');
-        table_name := split_part(seq_record.sequencename, '_', 1);
-        column_name := split_part(seq_record.sequencename, '_', 2);
+        table_name := regexp_replace(seq_record.sequencename, '_[^_]+_seq$', '');
+        -- is it a \1 or a \\1 in this Lisp format string?
+        column_name := regexp_replace(seq_record.sequencename, '^.*_([^_]+)_seq$', '\\1');
+        -- table_name := split_part(seq_record.sequencename, '_', 1);
+        -- column_name := split_part(seq_record.sequencename, '_', 2);
         
         -- Get the maximum value from the table column
         EXECUTE format('SELECT COALESCE(MAX(%I), 0) FROM %I.%I', 
